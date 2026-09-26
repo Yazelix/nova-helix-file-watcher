@@ -17,7 +17,7 @@ use steel::{
 steel::declare_module!(build_module);
 
 fn file_watcher_module() -> FFIModule {
-    let mut module = FFIModule::new("steel/file-watcher");
+    let mut module = FFIModule::new("steel/nova-file-watcher");
 
     module
         .register_fn("watch-files", watch_files)

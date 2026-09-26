@@ -1,4 +1,4 @@
-(#%require-dylib "libhelix_file_watcher" (only-in
+(#%require-dylib "libnova_helix_file_watcher" (only-in
     drain-event-paths!
     event-kind
     event-paths

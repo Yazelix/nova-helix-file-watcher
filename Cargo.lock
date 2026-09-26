@@ -512,15 +512,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
-name = "helix-file-watcher"
-version = "0.1.0"
-dependencies = [
- "abi_stable",
- "notify",
- "steel-core",
-]
-
-[[package]]
 name = "hermit-abi"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -877,6 +868,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42b8cfee0e339a0337359f3c88165702ac6e600dc01c0cc9579a92d62b08477a"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "nova-helix-file-watcher"
+version = "0.1.0"
+dependencies = [
+ "abi_stable",
+ "notify",
+ "steel-core",
 ]
 
 [[package]]

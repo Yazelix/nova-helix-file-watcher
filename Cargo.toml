@@ -1,10 +1,10 @@
 [package]
-name = "helix-file-watcher"
+name = "nova-helix-file-watcher"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "helix_file_watcher"
+name = "nova_helix_file_watcher"
 crate-type = ["rlib", "cdylib"]
 
 

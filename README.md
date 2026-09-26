@@ -18,7 +18,7 @@ This will build and install the library.
 You should then be able to use the library like so:
 
 ```steel
-(require "helix-file-watcher/file-watcher.scm")
+(require "nova-helix-file-watcher/file-watcher.scm")
 ```
 
 To watch open files, including files opened later:
