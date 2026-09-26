@@ -39,10 +39,13 @@
     (define file-last-modified (fs-metadata-modified (file-metadata x)))
     ;; Racing helix... no good
     (when (and helix-doc-last-saved (system-time<? helix-doc-last-saved file-last-modified))
-      (log::info! (to-string "reloading file: " x))
-      (editor-document-reload doc-id)
-      (when thunk
-        (thunk)))))
+      (if (editor-document-dirty? doc-id)
+          (set-warning! (to-string "File changed on disk; unsaved buffer preserved: " x))
+          (begin
+            (log::info! (to-string "reloading file: " x))
+            (editor-document-reload doc-id)
+            (when thunk
+              (thunk)))))))
 
 (define *min-poll-ms* 50)
 (define *max-poll-ms* 500)

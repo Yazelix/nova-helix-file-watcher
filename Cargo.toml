@@ -9,6 +9,6 @@ crate-type = ["rlib", "cdylib"]
 
 
 [dependencies]
-steel-core = { version = "0.8.2", git = "https://github.com/mattwparas/steel.git", features = ["dylibs", "sync"] }
+steel-core = { version = "0.8.3", git = "https://github.com/mattwparas/steel.git", rev = "1b785a4e9d24e3553b242522b35d4498dae72816", features = ["dylibs", "sync"] }
 abi_stable = "0.11.1"
 notify = "8.0.0"
