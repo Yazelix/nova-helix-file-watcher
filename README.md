@@ -21,7 +21,7 @@ You should then be able to use the library like so:
 (require "helix-file-watcher/file-watcher.scm")
 ```
 
-To start the watcher on the current directory:
+To watch open files, including files opened later:
 
 ```scheme
 (spawn-watcher)

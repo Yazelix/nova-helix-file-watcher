@@ -99,7 +99,9 @@
 (define (spawn-watcher [delay-ms 2000])
   (log::info! (to-string "setting initial watched files"))
   (set-watch-files (all-open-files))
-  (spawn-native-thread (lambda ()
-                         (set! *started* #t)
-                         (log::info! "starting event loop")
-                         (loop-events delay-ms))))
+  (define worker
+    (spawn-native-thread (lambda ()
+                           (log::info! "starting event loop")
+                           (loop-events delay-ms))))
+  (set! *started* #t)
+  worker)
