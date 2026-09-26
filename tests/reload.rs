@@ -3,12 +3,21 @@ use steel::steel_vm::{builtin::BuiltInModule, engine::Engine, register_fn::Regis
 
 #[test]
 fn external_changes_preserve_dirty_buffers_and_reload_clean_buffers() {
-    let path = std::env::temp_dir().join(format!("nova-file-watcher-test-{}", std::process::id()));
-    fs::write(&path, "on disk").unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "nova-file-watcher-test-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::File::create_new(&path).unwrap();
 
     let mut engine = Engine::new();
     let mut clock = BuiltInModule::new("test/clock");
     clock.register_fn("old-time", || SystemTime::UNIX_EPOCH);
+    let watch_path = path.to_string_lossy().into_owned();
+    clock.register_fn("watch-path", move || watch_path.clone());
     engine.register_module(clock);
     engine.register_steel_module(
         "helix-file-watcher.scm".into(),
@@ -16,8 +25,7 @@ fn external_changes_preserve_dirty_buffers_and_reload_clean_buffers() {
     );
     engine.register_steel_module(
         "helix/editor.scm".into(),
-        format!(
-            r#"
+        r#"
         (require-builtin test/clock)
         (provide editor-all-documents editor-document->path editor-document-last-saved
                  editor-document-dirty? editor-document-reload set-dirty! reload-count)
@@ -26,13 +34,12 @@ fn external_changes_preserve_dirty_buffers_and_reload_clean_buffers() {
         (define (set-dirty! value) (set! dirty value))
         (define (reload-count) reloads)
         (define (editor-all-documents) '(1))
-        (define (editor-document->path _) "{}")
+        (define (editor-document->path _) (watch-path))
         (define (editor-document-last-saved _) (old-time))
         (define (editor-document-dirty? _) dirty)
         (define (editor-document-reload _) (set! reloads (+ reloads 1)))
-        "#,
-            path.display()
-        ),
+        "#
+        .into(),
     );
     engine.register_steel_module(
         "helix/misc.scm".into(),
@@ -61,21 +68,18 @@ fn external_changes_preserve_dirty_buffers_and_reload_clean_buffers() {
 
     engine.run(include_str!("../file-watcher.scm")).unwrap();
 
-    let program = format!(
-        r#"
+    let program = r#"
+        (require-builtin test/clock)
         (require (only-in "helix/editor.scm" set-dirty! reload-count))
         (require (only-in "helix/misc.scm" warning-count))
         (set-dirty! #t)
-        (maybe-reload "{}")
+        (maybe-reload (watch-path))
         (assert! (= (reload-count) 0))
         (assert! (= (warning-count) 1))
         (set-dirty! #f)
-        (maybe-reload "{}")
+        (maybe-reload (watch-path))
         (assert! (= (reload-count) 1))
-        "#,
-        path.display(),
-        path.display()
-    );
+        "#;
 
     let result = engine.run(program);
     fs::remove_file(path).unwrap();
