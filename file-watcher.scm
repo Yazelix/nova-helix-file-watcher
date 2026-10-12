@@ -12,49 +12,57 @@
 (define watch-handle (list-ref _watcher-pair 0))
 (define event-handle (list-ref _watcher-pair 1))
 
-(define (all-open-files)
-  (~>> (editor-all-documents)
-       (map editor-document->path)
-       (filter id)
-       (map try-canonicalize-path)
-       (filter id)))
+(define *open-paths* (hash))
 
-(define (try-canonicalize-path x)
+(define (all-open-files)
+  ;; Only editor-context callers update this map; closed paths are discarded.
+  (set! *open-paths*
+        (foldl (lambda (doc-id paths)
+                 (define path (editor-document->path doc-id))
+                 (define resolved
+                   (and path (try-canonicalize-path path (hash-try-get *open-paths* path))))
+                 (if resolved (hash-insert paths path resolved) paths))
+               (hash)
+               (editor-all-documents)))
+  (hash-values->list *open-paths*))
+
+(define (try-canonicalize-path x [previous #f])
   (with-handler (lambda (err)
                   (log::info! (to-string "Failed canonicalizing path: " x err))
                   #f)
                 (with-handler
-                 ;; Keep the filename subscribed while a save has moved it aside.
+                 ;; Preserve the last symlink target while a save has moved it aside.
                  (lambda (_)
-                   (string-append (canonicalize-path (parent-name x)) "/" (file-name x)))
+                   (or previous
+                       (string-append (canonicalize-path (parent-name x)) "/" (file-name x))))
                  (canonicalize-path x))))
 
-(define (path->doc-id path)
-  (define paths
-    (filter (lambda (doc-id)
-              (define doc-path (editor-document->path doc-id))
-              (and doc-path (equal? (try-canonicalize-path doc-path) path)))
-            (editor-all-documents)))
-
-  (if (= (length paths) 1) (car paths) #f))
+(define (path->doc-ids path)
+  (filter (lambda (doc-id)
+            (define doc-path (editor-document->path doc-id))
+            (and doc-path
+                 (equal? (try-canonicalize-path doc-path (hash-try-get *open-paths* doc-path))
+                         path)))
+          (editor-all-documents)))
 
 ;; reload file only if the write time isn't the same as it is for helix
 (define (maybe-reload x [thunk #f])
-  (with-handler
-   (lambda (err) (log::info! (to-string "file watcher: could not reload " x ": " err)))
-   (define doc-id (path->doc-id x))
-   (when doc-id
-     (define helix-doc-last-saved (editor-document-last-saved doc-id))
-     (define file-last-modified (fs-metadata-modified (file-metadata x)))
-     ;; Racing helix... no good
-     (when (and helix-doc-last-saved (system-time<? helix-doc-last-saved file-last-modified))
-       (if (editor-document-dirty? doc-id)
-           (set-warning! (to-string "File changed on disk; unsaved buffer preserved: " x))
-           (begin
-             (log::info! (to-string "reloading file: " x))
-             (editor-document-reload doc-id)
-             (when thunk
-               (thunk))))))))
+  (for-each
+   (lambda (doc-id)
+     (with-handler
+      (lambda (err) (log::info! (to-string "file watcher: could not reload " x ": " err)))
+      (define helix-doc-last-saved (editor-document-last-saved doc-id))
+      (define file-last-modified (fs-metadata-modified (file-metadata x)))
+      ;; Racing helix... no good
+      (when (and helix-doc-last-saved (system-time<? helix-doc-last-saved file-last-modified))
+        (if (editor-document-dirty? doc-id)
+            (set-warning! (to-string "File changed on disk; unsaved buffer preserved: " x))
+            (begin
+              (log::info! (to-string "reloading file: " x))
+              (editor-document-reload doc-id)
+              (when thunk
+                (thunk)))))))
+   (path->doc-ids x)))
 
 (define *min-poll-ms* 50)
 (define *max-poll-ms* 500)

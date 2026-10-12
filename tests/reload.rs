@@ -50,9 +50,14 @@ fn watcher_preserves_dirty_buffers_and_watches_new_documents() {
         r#"
         (require-builtin test/clock)
         (provide editor-all-documents editor-document->path editor-document-last-saved
-                 editor-document-dirty? editor-document-reload set-dirty! reload-count set-documents! set-document-path!)
+                 editor-document-dirty? editor-document-reload set-dirty! reload-count set-documents! set-document-path!
+                 set-dirty-document! last-reloaded-document)
         (define dirty #f)
+        (define dirty-document #f)
+        (define (set-dirty-document! value) (set! dirty-document value))
         (define reloads 0)
+        (define last-reloaded #f)
+        (define (last-reloaded-document) last-reloaded)
         (define (set-dirty! value) (set! dirty value))
         (define (reload-count) reloads)
         (define documents '(1))
@@ -60,10 +65,11 @@ fn watcher_preserves_dirty_buffers_and_watches_new_documents() {
         (define (editor-all-documents) documents)
         (define document-path (watch-path))
         (define (set-document-path! value) (set! document-path value))
-        (define (editor-document->path doc) (if (= doc 1) document-path (control-path)))
+        (define (editor-document->path doc)
+          (cond [(= doc 1) document-path] [(= doc 3) (alias-path)] [else (control-path)]))
         (define (editor-document-last-saved _) (old-time))
-        (define (editor-document-dirty? _) dirty)
-        (define (editor-document-reload _) (set! reloads (+ reloads 1)))
+        (define (editor-document-dirty? doc) (or dirty (equal? doc dirty-document)))
+        (define (editor-document-reload doc) (set! reloads (+ reloads 1)) (set! last-reloaded doc))
         "#
         .into(),
     );
@@ -103,7 +109,8 @@ fn watcher_preserves_dirty_buffers_and_watches_new_documents() {
 
     let program = r#"
         (require-builtin test/clock)
-        (require (only-in "helix/editor.scm" set-dirty! reload-count set-documents! set-document-path!))
+        (require (only-in "helix/editor.scm" set-dirty! reload-count set-documents! set-document-path!
+                          set-dirty-document! last-reloaded-document))
         (require (only-in "helix/misc.scm" fire-hook! warning-count run-callbacks!))
         (require (only-in "helix-file-watcher.scm" watched-paths fail-registration!))
         (set-dirty! #t)
@@ -136,9 +143,18 @@ fn watcher_preserves_dirty_buffers_and_watches_new_documents() {
         (set-document-path! (alias-path))
         (maybe-reload (watch-path))
         (unless (= (reload-count) 2) (error! "canonical event did not match the document alias"))
+        (fail-registration! #f)
+        (fire-hook! 'document-opened)
     "#,
     );
     fs::rename(&path, root.join("backup")).unwrap();
+    let absent_alias_result = engine.run(
+        r#"
+        (fire-hook! 'document-closed)
+        (unless (equal? (watched-paths) (list (watch-path)))
+          (error! "a temporarily missing symlink target lost its subscription"))
+    "#,
+    );
     let missing_result = engine.run(
         r#"
         (set-document-path! (watch-path))
@@ -165,12 +181,26 @@ fn watcher_preserves_dirty_buffers_and_watches_new_documents() {
         (unless (= (reload-count) 3) (error! "a missing file prevented the live control from reloading"))
     "#,
     );
+    fs::write(&path, "victim restored").unwrap();
+    let multiple_aliases_result = engine.run(
+        r#"
+        (set-documents! '(1 3))
+        (maybe-reload (watch-path))
+        (unless (= (reload-count) 5) (error! "two aliases of the same file did not both reload"))
+        (set-dirty-document! 1)
+        (maybe-reload (watch-path))
+        (unless (and (= (reload-count) 6) (= (last-reloaded-document) 3) (= (warning-count) 3))
+          (error! "a dirty alias was not preserved independently of its clean sibling"))
+    "#,
+    );
     fs::remove_dir_all(root).unwrap();
     let failures: Vec<_> = [
         ("reload policy and hooks", result),
         ("path alias", alias_result),
+        ("temporarily missing symlink target", absent_alias_result),
         ("temporarily missing file", missing_result),
         ("delayed callback deletion", callback_result),
+        ("multiple aliases", multiple_aliases_result),
     ]
     .into_iter()
     .filter_map(|(case, result)| result.err().map(|error| format!("{case}: {error}")))
