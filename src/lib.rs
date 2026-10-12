@@ -264,7 +264,7 @@ mod tests {
     use super::*;
     use std::{
         fs,
-        time::{Duration, SystemTime},
+        time::{Duration, Instant, SystemTime},
     };
 
     fn drain(events: &EventHandle) {
@@ -277,14 +277,41 @@ mod tests {
         {}
     }
 
-    fn receive(events: &EventHandle, path: &PathBuf) {
-        let event = events
-            .0
-            .lock()
-            .unwrap()
-            .recv_timeout(Duration::from_secs(3))
-            .expect("file event missing");
-        assert_eq!(event.paths, [path.clone()]);
+    fn receive(events: &EventHandle, path: &PathBuf, watched: &[&PathBuf]) {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let remaining = deadline
+                .checked_duration_since(Instant::now())
+                .unwrap_or_else(|| panic!("file event missing for {path:?}"));
+            let event = events
+                .0
+                .lock()
+                .unwrap()
+                .recv_timeout(remaining)
+                .unwrap_or_else(|error| panic!("file event missing for {path:?}: {error}"));
+            assert!(
+                event.paths.iter().all(|actual| watched.contains(&actual)),
+                "unwatched path delivered: {event:?}"
+            );
+            // Other open files can precede or share the expected notification batch.
+            if event.paths.contains(path) {
+                return;
+            }
+        }
+    }
+
+    #[test]
+    fn receiving_a_path_allows_other_watched_notifications() {
+        let victim = PathBuf::from("/victim");
+        let control = PathBuf::from("/control");
+        let (sender, receiver) = channel();
+        let events = EventHandle(Mutex::new(receiver));
+        for paths in [vec![control.clone()], vec![control.clone(), victim.clone()]] {
+            let mut event = Event::new(notify::EventKind::Any);
+            event.paths = paths;
+            sender.send(event).unwrap();
+        }
+        receive(&events, &victim, &[&victim, &control]);
     }
 
     #[test]
@@ -321,10 +348,10 @@ mod tests {
                 fs::write(&replacement, "replaced").unwrap();
                 fs::rename(&replacement, &victim).unwrap();
             }
-            receive(&events, &victim);
+            receive(&events, &victim, &[&victim, &control]);
             drain(&events);
             fs::write(&victim, "later write").unwrap();
-            receive(&events, &victim);
+            receive(&events, &victim, &[&victim, &control]);
             drain(&events);
         }
 
@@ -340,7 +367,7 @@ mod tests {
             .recv_timeout(Duration::from_millis(300))
             .is_err());
         fs::write(&control, "still watched").unwrap();
-        receive(&events, &control);
+        receive(&events, &control, &[&control]);
         drain(&events);
         watcher.set_files(vec![]).unwrap();
         assert!(
@@ -356,7 +383,11 @@ mod tests {
             .watch_file(root.join("missing/file").to_str().unwrap().to_owned())
             .unwrap();
         fs::write(root.join("missing/file"), "recovered").unwrap();
-        receive(&events, &root.join("missing/file"));
+        receive(
+            &events,
+            &root.join("missing/file"),
+            &[&root.join("missing/file")],
+        );
         drop(watcher);
         fs::remove_dir_all(root).unwrap();
     }
