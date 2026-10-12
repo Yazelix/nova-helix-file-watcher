@@ -23,29 +23,38 @@
   (with-handler (lambda (err)
                   (log::info! (to-string "Failed canonicalizing path: " x err))
                   #f)
-                (canonicalize-path x)))
+                (with-handler
+                 ;; Keep the filename subscribed while a save has moved it aside.
+                 (lambda (_)
+                   (string-append (canonicalize-path (parent-name x)) "/" (file-name x)))
+                 (canonicalize-path x))))
 
 (define (path->doc-id path)
   (define paths
-    (filter (lambda (doc-id) (equal? (editor-document->path doc-id) path)) (editor-all-documents)))
+    (filter (lambda (doc-id)
+              (define doc-path (editor-document->path doc-id))
+              (and doc-path (equal? (try-canonicalize-path doc-path) path)))
+            (editor-all-documents)))
 
   (if (= (length paths) 1) (car paths) #f))
 
 ;; reload file only if the write time isn't the same as it is for helix
 (define (maybe-reload x [thunk #f])
-  (define doc-id (path->doc-id x))
-  (when doc-id
-    (define helix-doc-last-saved (editor-document-last-saved doc-id))
-    (define file-last-modified (fs-metadata-modified (file-metadata x)))
-    ;; Racing helix... no good
-    (when (and helix-doc-last-saved (system-time<? helix-doc-last-saved file-last-modified))
-      (if (editor-document-dirty? doc-id)
-          (set-warning! (to-string "File changed on disk; unsaved buffer preserved: " x))
-          (begin
-            (log::info! (to-string "reloading file: " x))
-            (editor-document-reload doc-id)
-            (when thunk
-              (thunk)))))))
+  (with-handler
+   (lambda (err) (log::info! (to-string "file watcher: could not reload " x ": " err)))
+   (define doc-id (path->doc-id x))
+   (when doc-id
+     (define helix-doc-last-saved (editor-document-last-saved doc-id))
+     (define file-last-modified (fs-metadata-modified (file-metadata x)))
+     ;; Racing helix... no good
+     (when (and helix-doc-last-saved (system-time<? helix-doc-last-saved file-last-modified))
+       (if (editor-document-dirty? doc-id)
+           (set-warning! (to-string "File changed on disk; unsaved buffer preserved: " x))
+           (begin
+             (log::info! (to-string "reloading file: " x))
+             (editor-document-reload doc-id)
+             (when thunk
+               (thunk))))))))
 
 (define *min-poll-ms* 50)
 (define *max-poll-ms* 500)

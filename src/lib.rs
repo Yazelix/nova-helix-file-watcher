@@ -298,6 +298,7 @@ mod tests {
                 .as_nanos()
         ));
         fs::create_dir(&root).unwrap();
+        let root = root.canonicalize().unwrap();
         let victim = root.join("victim");
         let control = root.join("control");
         fs::write(&victim, "initial").unwrap();
