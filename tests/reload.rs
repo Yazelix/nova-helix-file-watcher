@@ -51,7 +51,7 @@ fn watcher_preserves_dirty_buffers_and_watches_new_documents() {
         (require-builtin test/clock)
         (provide editor-all-documents editor-document->path editor-document-last-saved
                  editor-document-dirty? editor-document-reload set-dirty! reload-count set-documents! set-document-path!
-                 set-dirty-document! last-reloaded-document)
+                 set-dirty-document! last-reloaded-document set-last-saved!)
         (define dirty #f)
         (define dirty-document #f)
         (define (set-dirty-document! value) (set! dirty-document value))
@@ -67,7 +67,9 @@ fn watcher_preserves_dirty_buffers_and_watches_new_documents() {
         (define (set-document-path! value) (set! document-path value))
         (define (editor-document->path doc)
           (cond [(= doc 1) document-path] [(= doc 3) (alias-path)] [else (control-path)]))
-        (define (editor-document-last-saved _) (old-time))
+        (define last-saved (old-time))
+        (define (set-last-saved! value) (set! last-saved value))
+        (define (editor-document-last-saved _) last-saved)
         (define (editor-document-dirty? doc) (or dirty (equal? doc dirty-document)))
         (define (editor-document-reload doc) (set! reloads (+ reloads 1)) (set! last-reloaded doc))
         "#
@@ -110,7 +112,7 @@ fn watcher_preserves_dirty_buffers_and_watches_new_documents() {
     let program = r#"
         (require-builtin test/clock)
         (require (only-in "helix/editor.scm" set-dirty! reload-count set-documents! set-document-path!
-                          set-dirty-document! last-reloaded-document))
+                          set-dirty-document! last-reloaded-document set-last-saved!))
         (require (only-in "helix/misc.scm" fire-hook! warning-count run-callbacks!))
         (require (only-in "helix-file-watcher.scm" watched-paths fail-registration!))
         (set-dirty! #t)
@@ -193,6 +195,34 @@ fn watcher_preserves_dirty_buffers_and_watches_new_documents() {
           (error! "a dirty alias was not preserved independently of its clean sibling"))
     "#,
     );
+    engine
+        .run(
+            r#"
+        (set-documents! '(1))
+        (set-dirty-document! #f)
+        (set-last-saved! (fs-metadata-modified (file-metadata (watch-path))))
+    "#,
+        )
+        .unwrap();
+    fs::write(&path, "restored file with older timestamp").unwrap();
+    fs::File::open(&path)
+        .unwrap()
+        .set_modified(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1))
+        .unwrap();
+    let timestamp_result = engine.run(
+        r#"
+        (maybe-reload (watch-path))
+        (unless (= (reload-count) 7) (error! "restoring an older file did not reload"))
+        (set-last-saved! (fs-metadata-modified (file-metadata (watch-path))))
+        (maybe-reload (watch-path))
+        (unless (= (reload-count) 7) (error! "unchanged timestamp triggered another reload"))
+        (set-last-saved! (system-time/now))
+        (set-dirty! #t)
+        (maybe-reload (watch-path))
+        (unless (and (= (reload-count) 7) (= (warning-count) 4))
+          (error! "older-file restoration did not preserve and warn for a dirty buffer"))
+    "#,
+    );
     fs::remove_dir_all(root).unwrap();
     let failures: Vec<_> = [
         ("reload policy and hooks", result),
@@ -201,6 +231,7 @@ fn watcher_preserves_dirty_buffers_and_watches_new_documents() {
         ("temporarily missing file", missing_result),
         ("delayed callback deletion", callback_result),
         ("multiple aliases", multiple_aliases_result),
+        ("restored timestamp", timestamp_result),
     ]
     .into_iter()
     .filter_map(|(case, result)| result.err().map(|error| format!("{case}: {error}")))

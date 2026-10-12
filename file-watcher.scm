@@ -53,8 +53,8 @@
       (lambda (err) (log::info! (to-string "file watcher: could not reload " x ": " err)))
       (define helix-doc-last-saved (editor-document-last-saved doc-id))
       (define file-last-modified (fs-metadata-modified (file-metadata x)))
-      ;; Racing helix... no good
-      (when (and helix-doc-last-saved (system-time<? helix-doc-last-saved file-last-modified))
+      ;; Restoring a file can move its disk timestamp backward.
+      (when (and helix-doc-last-saved (not (equal? helix-doc-last-saved file-last-modified)))
         (if (editor-document-dirty? doc-id)
             (set-warning! (to-string "File changed on disk; unsaved buffer preserved: " x))
             (begin
