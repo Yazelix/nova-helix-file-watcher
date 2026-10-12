@@ -85,14 +85,20 @@
        (loop *min-poll-ms*)])))
 
 (define (set-watch-files paths)
-  (for-each (lambda (x) (watch-file! watch-handle x)) paths))
+  (with-handler
+   (lambda (err)
+     (log::info! (to-string "file watcher: registration failed: " err))
+     (set-warning! (to-string "File watcher could not update subscriptions: " err)))
+   (set-watched-files! watch-handle paths)))
 
 (define *started* #f)
 
-(register-hook! 'document-opened
-                (lambda (_)
-                  (when *started*
-                    (set-watch-files (all-open-files)))))
+(for-each (lambda (hook)
+            (register-hook! hook
+                            (lambda (_)
+                              (when *started*
+                                (set-watch-files (all-open-files))))))
+          '(document-opened document-saved document-closed))
 
 ;;@doc
 ;; Spawn a file watcher which will reload

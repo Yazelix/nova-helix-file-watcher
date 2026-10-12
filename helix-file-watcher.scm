@@ -3,6 +3,7 @@
     event-kind
     event-paths
     make-empty-watcher
+    set-watched-files!
     try-receive-event!
     unwatch-file!
     watch-file!
@@ -13,6 +14,7 @@
     event-kind
     event-paths
     make-empty-watcher
+    set-watched-files!
     try-receive-event!
     unwatch-file!
     watch-file!
